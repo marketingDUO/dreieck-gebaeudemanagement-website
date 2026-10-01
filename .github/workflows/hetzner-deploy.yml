@@ -1,0 +1,92 @@
+name: Hetzner – Dreieck Gebäudemanagement
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+    inputs:
+      operation:
+        description: "Aktion auswählen"
+        required: true
+        default: "connection_test"
+        type: choice
+        options:
+          - connection_test
+          - deploy
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dreieck-hetzner
+  cancel-in-progress: false
+
+jobs:
+  transfer:
+    name: SFTP-Verbindung und Übertragung
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      HETZNER_HOST: ${{ secrets.HETZNER_HOST }}
+      HETZNER_USER: ${{ secrets.HETZNER_USER }}
+      HETZNER_PORT: ${{ secrets.HETZNER_PORT }}
+      HETZNER_PASSWORD: ${{ secrets.HETZNER_PASSWORD }}
+
+    steps:
+      - name: Repository laden
+        uses: actions/checkout@v6
+
+      - name: Einstellungen prüfen
+        shell: bash
+        run: |
+          test -n "$HETZNER_HOST"
+          test -n "$HETZNER_USER"
+          test -n "$HETZNER_PORT"
+          test -n "$HETZNER_PASSWORD"
+
+      - name: SFTP-Werkzeug installieren
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes lftp
+
+      - name: Verbindung testen – kein Upload
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.operation == 'connection_test' }}
+        shell: bash
+        run: |
+          lftp -u "$HETZNER_USER","$HETZNER_PASSWORD" "sftp://$HETZNER_HOST:$HETZNER_PORT" -e "
+            set cmd:fail-exit yes;
+            set net:max-retries 2;
+            set net:timeout 20;
+            set sftp:auto-confirm yes;
+            cls -1 /;
+            bye
+          "
+
+      - name: Website aus dist übertragen
+        if: ${{ github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.operation == 'deploy') }}
+        shell: bash
+        run: |
+          test -f dist/index.html
+          lftp -u "$HETZNER_USER","$HETZNER_PASSWORD" "sftp://$HETZNER_HOST:$HETZNER_PORT" -e "
+            set cmd:fail-exit yes;
+            set net:max-retries 2;
+            set net:timeout 20;
+            set sftp:auto-confirm yes;
+            mirror --reverse --verbose dist/ /;
+            get /index.html -o \"$RUNNER_TEMP/dreieck-index.html\";
+            get /assets/leistungen/winterdienst.webp -o \"$RUNNER_TEMP/dreieck-winterdienst.webp\";
+            bye
+          "
+          cmp dist/index.html "$RUNNER_TEMP/dreieck-index.html"
+          cmp dist/assets/leistungen/winterdienst.webp "$RUNNER_TEMP/dreieck-winterdienst.webp"
+          echo "Website und Bilddateien erfolgreich übertragen und geprüft."
+
+      - name: Öffentliche Domain prüfen
+        continue-on-error: true
+        shell: bash
+        run: |
+          curl --fail --silent --show-error --location --max-time 25 https://dreieck-berlin.de/ -o "$RUNNER_TEMP/dreieck-public.html"
+          cmp dist/index.html "$RUNNER_TEMP/dreieck-public.html"
+          echo "Auch die öffentliche Domain liefert den aktuellen Website-Stand."
