@@ -75,8 +75,8 @@ jobs:
             set net:timeout 20;
             set sftp:auto-confirm yes;
             mirror --reverse --verbose dist/ /;
-            get /index.html -o \"$RUNNER_TEMP/dreieck-index.html\";
-            get /assets/leistungen/winterdienst.webp -o \"$RUNNER_TEMP/dreieck-winterdienst.webp\";
+            get /index.html -o $RUNNER_TEMP/dreieck-index.html;
+            get /assets/leistungen/winterdienst.webp -o $RUNNER_TEMP/dreieck-winterdienst.webp;
             bye
           "
           cmp dist/index.html "$RUNNER_TEMP/dreieck-index.html"
